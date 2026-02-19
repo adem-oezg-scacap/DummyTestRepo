@@ -1,11 +1,12 @@
 name: Remind no-squash on release->development
 
 on:
-  pull_request_review:
-    types: [submitted]
+  pull_request:
+    types: [opened]
 
 permissions:
   pull-requests: write
+  issues: write
   contents: read
 
 jobs:
@@ -32,22 +33,6 @@ jobs:
             });
 
             if (comments.some(c => c.body?.includes(reminderTag))) return;
-
-            const { data } = await github.graphql(`
-              query ($owner: String!, $repo: String!, $number: Int!) {
-                repository(owner: $owner, name: $repo) {
-                  pullRequest(number: $number) {
-                    reviewDecision
-                  }
-                }
-              }
-            `, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              number: pr.number
-            });
-
-            if (data.repository.pullRequest.reviewDecision !== 'APPROVED') return;
 
             const body = `${reminderTag}
             Hi @${pr.user.login} 👋  
