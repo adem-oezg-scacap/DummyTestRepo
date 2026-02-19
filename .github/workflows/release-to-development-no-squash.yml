@@ -1,0 +1,71 @@
+name: Remind no-squash on release->development
+
+on:
+  pull_request_review:
+    types: [submitted]
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  remind-no-squash:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR and post reminder
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) return;
+
+            const isRelease = pr.head.ref.startsWith('release/');
+            const isToDevelopment = pr.base.ref === 'development';
+            if (!isRelease || !isToDevelopment) return;
+
+            const reminderTag = '[no-squash-reminder]';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              per_page: 100
+            });
+
+            if (comments.some(c => c.body?.includes(reminderTag))) return;
+
+            let shouldPost = false;
+
+            if (context.eventName === 'pull_request_review') {
+              const { data } = await github.graphql(`
+                query ($owner: String!, $repo: String!, $number: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $number) {
+                      reviewDecision
+                    }
+                  }
+                }
+              `, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                number: pr.number
+              });
+
+              shouldPost = data.repository.pullRequest.reviewDecision === 'APPROVED';
+            } else {
+              shouldPost = true;
+            }
+
+            if (!shouldPost) return;
+
+            const body = `${reminderTag}
+            Hi @${pr.user.login} 👋  
+            This PR merges a release branch into development. Please **do not squash**—use a **merge commit** to preserve the release history.`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body
+            });
