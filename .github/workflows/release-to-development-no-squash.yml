@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   remind-no-squash:
-    if: github.event.pull_request.base.ref == 'development' && startsWith(github.event.pull_request.head.ref, 'release/')
+    if: >
+      github.event.pull_request.base.ref == 'development' &&
+      startsWith(github.event.pull_request.head.ref, 'release/')
     runs-on: ubuntu-latest
     steps:
       - name: Check PR and post reminder
@@ -30,21 +32,25 @@ jobs:
 
             if (comments.some(c => c.body?.includes(reminderTag))) return;
 
-            const { data } = await github.graphql(`
-              query ($owner: String!, $repo: String!, $number: Int!) {
-                repository(owner: $owner, name: $repo) {
-                  pullRequest(number: $number) {
-                    reviewDecision
-                  }
-                }
-              }
-            `, {
+            const { data: reviews } = await github.rest.pulls.listReviews({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              number: pr.number
+              pull_number: pr.number,
+              per_page: 100
             });
 
-            if (data.repository.pullRequest.reviewDecision !== 'APPROVED') return;
+            const latestByUser = new Map();
+            for (const review of reviews) {
+              const login = review.user?.login;
+              if (!login) continue;
+              const existing = latestByUser.get(login);
+              if (!existing || new Date(review.submitted_at) > new Date(existing.submitted_at)) {
+                latestByUser.set(login, review);
+              }
+            }
+
+            const approvalsCount = Array.from(latestByUser.values()).filter(review => review.state === 'APPROVED').length;
+            if (approvalsCount < 2) return;
 
             const body = `${reminderTag}
             Hi @${pr.user.login} 👋  
